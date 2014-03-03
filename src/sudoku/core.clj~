@@ -1,0 +1,276 @@
+(ns sudoku.core
+  (:import (java.lang Math)
+           )
+;  (:use sudoku.front)
+  )
+
+(def ^:dynamic dim1_constraints nil)
+(def ^:dynamic dim2_constraints nil)
+(def ^:dynamic box_constraints nil)
+(def ^:dynamic dim1list nil)
+(def ^:dynamic dim2list nil)
+(def ^:dynamic boxlist nil)
+(def ^:dynamic ibase nil)
+(def ^:dynamic jbase nil)
+(def ^:dynamic value nil)
+(def ^:dynamic grid nil)
+(def ^:dynamic calls 0)
+(def ^:dynamic min_box nil)
+(def ^:dynamic moves nil)
+(def ^:dynamic move nil)
+(def ^:dynamic new_grid nil)
+(def ^:dynamic the_grid nil)
+(def ^:dynamic constraint_groups nil)
+(def ^:dynamic changed nil)
+(def ^:dynamic nval nil)
+(def ^:dynamic ret nil)
+;(def ^:dynamic sudoku_m1 nil)
+(def ^:dynamic i nil)
+(def ^:dynamic j nil)
+(def ^:dynamic set-difference nil)
+
+(declare inc-count)
+
+
+(defn initialize_sudoku []
+  (binding [grid (make-array clojure.lang.PersistentVector 9 9)]
+    (doseq [i (range 0 9) j (range 0 9)]
+      (aset grid i j [1 2 3 4 5 6 7 8 9]))
+    grid))
+
+(defn create_constraint_groups []
+  (binding [
+            dim1_constraints (make-array clojure.lang.PersistentVector 9 9)
+            dim2_constraints (make-array clojure.lang.PersistentVector 9 9)
+            box_constraints  (make-array clojure.lang.PersistentVector 9 9)
+            ]
+    (doseq [i (range 0 9) j (range 0 9)]
+      (binding
+          [
+           dim1list []
+           dim2list []
+           boxlist  []
+           ]
+	  (dotimes [k 9]
+	    (set! dim1list (conj dim1list [k j]))
+	    (set! dim2list (conj dim2list [i k])))
+
+	  (binding [
+                    ibase (int (* 3 (java.lang.Math/floor (/ i 3))))
+                    jbase (int (* 3 (java.lang.Math/floor (/ j 3))))
+                    ]
+	    (dotimes [k 3]
+	      (dotimes [m 3]
+		(set! boxlist (conj boxlist [(+ ibase k) (+ jbase m)]))))
+	    )
+          (aset dim1_constraints i j dim1list)
+          (aset dim2_constraints i j dim2list)
+          (aset box_constraints i j boxlist)
+	  )
+      )
+    [ dim1_constraints dim2_constraints box_constraints]))
+
+(defn horizontal_line []
+  (println "-----------------------------------------"))
+
+(defn show_current_grid [the_grid]
+  (println "The grid:")
+  (horizontal_line)
+  (horizontal_line)
+  (dotimes [i 9]
+    (dotimes [i2 3]
+      (print "|")
+      (dotimes [j 9]
+        (cond (= j 0) (print "|"))
+        (dotimes [j2 3]
+          (binding [
+                    value (+ 1 j2 (* i2 3))
+                    ]
+            (if (some #{value} (aget the_grid i j))
+                (print value)
+	      (print " "))))
+        (cond (= (mod (+ 1 j) 3) 0) (print "|"))
+        (print "|"))
+      (println ""))
+    (cond (= (mod (+ 1 i) 3) 0) (horizontal_line))
+    (horizontal_line)))
+
+(defn forward_propagate_constraints [the_grid changed constraint_groups]
+  (binding
+      [
+       dim1_constraints (first constraint_groups)
+       dim2_constraints (second constraint_groups)
+       box_constraints  (nth constraint_groups 2)
+       set-difference (fn [x y] (vec (filter (fn [w] (if (nil? (some #{w} y)) 1) ) x)))
+       ]
+
+                                        ;Checking each of the constraints and removing all conflicting values
+    (doseq [c changed]
+      (doseq [s (aget dim1_constraints (first c) (second c))]
+	(if (not (= c s))
+	    (aset the_grid (first s) (second s) (set-difference (aget the_grid (first s) (second s)) (aget the_grid (first c) (second c))))
+	  )
+	)
+      (doseq [s (aget dim2_constraints (first c) (second c))]
+	(if (not (= c s))
+	    (aset the_grid (first s) (second s) (set-difference (aget the_grid (first s) (second s)) (aget the_grid (first c) (second c))))
+	  )
+	)
+      (doseq [s (aget box_constraints (first c) (second c))]
+	(if (not (= c s))
+	    (aset the_grid (first s) (second s) (set-difference (aget the_grid (first s) (second s)) (aget the_grid (first c) (second c))))
+	  )
+	)
+
+      )
+    the_grid
+    )
+  )
+
+(defn reject [the_grid]
+  (binding [value nil]
+  (dotimes [i 9]
+    (dotimes [j 9]
+      (if (or (= (aget the_grid i j) nil) (= (aget the_grid i j) []))
+	  (set! value true))))
+  value))
+
+  (defn accept [the_grid]
+    (binding
+	[value true]
+      (dotimes [i 9]
+	(dotimes [j 9]
+	  (if (not (= (count (aget the_grid i j)) 1))
+	      (set! value nil)
+	    )
+	  )
+	)
+      (do (cond (= value true) (print "accepting ")) value)
+      )
+    )
+
+(defn inc-count [move]
+  (def calls (+ calls move))     
+  )
+
+;makes a copy of the grid
+(defn copy [the_grid]
+  (binding[
+           new_grid (make-array clojure.lang.PersistentVector 9 9)
+           ]
+       (dotimes [i 9]
+	 (dotimes [j 9]
+	   (aset  new_grid i j (aget the_grid i j))
+	   )
+	 )
+       new_grid
+       ))
+
+  (defn backtrack_search [the_grid constraint_groups & [transient-grid]]
+    (inc-count 1)
+    (binding
+        [
+         dim1_constraints (first constraint_groups)
+         dim2_constraints (second constraint_groups)
+         box_constraints (nth constraint_groups 2)
+         min_box []
+         moves []
+         new_grid nil
+         value nil
+         nval nil
+         ret nil
+         ]
+      ;(send transient-grid #(assoc % :grid (copy the_grid)))
+      (cond
+       (reject the_grid) nil
+       (accept the_grid) the_grid
+       :else  (do
+	     ;loop determines  a starting location on the grid where number of possibilities is more than 1
+	     (dotimes [i 9]
+	       (dotimes [j 9]
+		 (if (> (count (aget the_grid i j)) 1)
+                   (set! min_box [i j])              
+		   )
+		 )
+	       )
+                                        ;            (show_current_grid new_grid)
+
+                                        ;loop determines a location with least number of possibilities but greater than 1
+	     (dotimes [i 9]
+	       (dotimes [j 9]
+		 (set! value (aget the_grid i j))
+		 (set! nval (aget the_grid (first min_box) (second min_box)))
+		 (if (and (> (count value) 1) (< (count value) (count nval)))
+		     (set! min_box [i j])
+		   )
+		 )
+	       )
+             ;(print min_box)
+	     ;list of possible moves for the chosen location
+	     (set! moves (aget the_grid (first min_box) (second min_box)))
+	     (doseq [m moves]
+               (if (nil? new_grid)
+                 (do
+                   (set! new_grid (copy the_grid))
+                   (aset new_grid (first min_box) (second min_box) [m])
+                                        ;(set! new_grid (backtrack_search (forward_propagate_constraints new_grid [min_box] constraint_groups) constraint_groups))
+                   (set! new_grid (backtrack_search (forward_propagate_constraints new_grid [min_box] constraint_groups) constraint_groups transient-grid))
+                   (if (not (= new_grid nil))
+                     (set! ret new_grid)
+                     )
+                   ))
+
+	     )ret)) ))
+
+  (defn solve_sudoku [initial_set & [transient-grid]]
+    (def calls 0)
+    (binding
+        [
+					; Set up the initial grid
+         the_grid (initialize_sudoku)
+					; Create the helper arrays associated with create_constraint_groups
+         constraint_groups (create_constraint_groups)
+					; Set the list changed initially to the empty list
+	 changed []
+         ]
+
+					; Go through the items in the initial_set and set the grid locations
+					;   identified at each location to just that value and add that location
+					;   to the list changed
+      (set! changed (vec (map
+                         (fn [x]
+                           (aset the_grid (first x) (second x) [(nth x 2)])
+                           [(first x) (second x)]) initial_set)))
+
+            ;(print changed)
+                                        ;(show_current_grid the_grid)
+					; Forward propagate the results of the initial values set for the puzzle
+
+      (set! the_grid (forward_propagate_constraints the_grid changed constraint_groups))
+
+					; Print out the grid so far
+
+					; Conduct a backtrack search for a solution, your call should include
+					;   a recursive call to backtrack_search and after each location is set
+					;   you should again call forward_propagate_constraints
+
+
+                                        ;(set! the_grid (backtrack_search the_grid constraint_groups))
+      (set! the_grid (backtrack_search the_grid constraint_groups transient-grid))
+      ;(show_current_grid the_grid)
+      (println " calls to back track search=" calls)
+
+					; Print out a solution if one is found
+      (if the_grid
+        (do (println "Solution for problem :") the_grid)
+;        (do (await transient-grid) (send-off transient-grid #(assoc % :processing false :grid the_grid)) (println "Solution for problem :") the_grid)
+        (do (println "No solution possible for problem ")))
+ ;       (do (await transient-grid) (send-off transient-grid #(assoc % :processing false :grid initial_set)) (println "No solution possible for problem ")))
+      )
+    )
+
+
+
+
+
+

@@ -1,0 +1,213 @@
+(ns sudoku.front
+  (:import (java.awt Graphics2D BasicStroke Rectangle Color Font Panel Checkbox CheckboxGroup)
+           (java.awt.event MouseAdapter MouseEvent FocusEvent ItemListener ItemEvent)
+           (java.util.regex Pattern)
+           (javax.swing JButton JTextField JOptionPane JRadioButton ButtonGroup)           
+           )
+  (:use sudoku.core)
+  (:gen-class
+   :name front
+   :exposes-methods {paint superPaint}
+   :post-init add-listeners
+   :extends java.applet.Applet))
+
+(def ^:dynamic object nil)
+(def ^:dynamic squares nil)
+(def ^:dynamic problem)
+(def ^:dynamic solution)
+(def ^:dynamic box)
+(def ^:dynamic sudoku_m1)
+(def ^:dynamic sudoku_m2)
+(def ^:dynamic sudoku_m3)
+(def ^:dynamic processing nil)
+(def transient-grid (agent {:processing false :grid (sudoku.core/initialize_sudoku)}))  
+(declare -handle-reset)
+(declare -handle-solve)
+(declare -handle-sample)
+(declare -fill-grid)
+(def indices (map vector (reduce concat (map #(repeat 9 %) (range 9))) (reduce concat (repeat 9 (range 9)))))
+(def reset (JButton. "Reset"))
+(def solve (JButton. "Solve"))
+(def group (CheckboxGroup.))
+(def sample1 (Checkbox. "Sample 1" group false))
+(def sample2 (Checkbox. "Sample 2" group false))
+(def sample3 (Checkbox. "Sample 3" group false))
+(def sudoku_m1
+  '((0 1 2) (0 2 6) (0 5 9) (0 6 1)
+    (1 6 4)
+    (2 0 7) (2 1 4) (2 4 8) (2 6 3)
+    (3 1 3) (3 4 5) (3 6 9)
+    (4 0 9) (4 2 7) (4 6 6) (4 8 5)
+    (5 2 4) (5 4 1) (5 7 8)
+    (6 2 8) (6 4 9) (6 7 4) (6 8 3)
+    (7 2 3)
+    (8 2 1) (8 3 5) (8 6 7) (8 7 9)))
+(def sudoku_m2
+  '((0 1 9) (0 4 5) (0 7 4) (0 8 6)
+    (1 5 2) (1 6 9)
+    (2 0 6) (2 1 3) (2 4 9) (2 8 1)
+    (3 1 2) (3 2 9) (3 3 4) (3 4 6)
+    (4 0 7) (4 8 3)
+    (5 4 7) (5 5 8) (5 6 4) (5 7 2)
+    (6 0 1) (6 4 4) (6 7 9) (6 8 2)
+    (7 2 4) (7 3 2)
+    (8 0 3) (8 1 8) (8 4 1) (8 7 5)))
+(def sudoku_m3
+  '((0 0 2) (0 8 8)
+    (1 0 6) (1 5 4) (1 7 1)
+    (2 0 5) (2 1 8) (2 3 6) (2 4 9) (2 5 2) (2 7 7)
+    (3 3 8) (3 4 2) (3 6 7) (3 8 4)
+    (4 3 1) (4 5 9)
+    (5 0 8) (5 2 5) (5 4 7) (5 5 6)
+    (6 1 5) (6 3 2) (6 4 6) (6 5 3) (6 7 4) (6 8 9)
+    (7 1 2) (7 3 7) (7 8 1)
+    (8 0 4) (8 8 7)))
+
+
+
+  
+(def squares
+  (zipmap indices
+          (map
+           #(vector
+             (apply (fn [x y w h] (new Rectangle x y w h))
+                    (concat
+                     (map
+                      (fn [c]
+                        (+ (* c 30)
+                           (* 20 (cond
+                                  (zero? c) 0
+                                  (zero? (mod c 3)) (/ c 3)
+                                  :else (/ (first (filter (fn [x] (if (zero? (mod x 3)) 1)) (reverse (range 0 c)))) 3)))
+                           )
+                        ) %)
+                     [30 30])) (proxy [JTextField] []
+                                 (processFocusEvent [e]
+                                   (if
+                                       (and (= (.getID e) FocusEvent/FOCUS_LOST)
+                                            (not (.isEmpty (.getText this)))
+                                            (not (Pattern/matches "^[0-9]$" (.getText this)))
+                                            )
+                                     (do (.setText this "") (JOptionPane/showMessageDialog object "Please enter a single digit"))
+                                     )
+                                   )
+                                 ))
+           indices))
+  )
+
+(defn -paint [instance #^Graphics2D g]
+  (.superPaint object g)
+  (doto g
+    (.setFont (Font. "Monospaced" Font/PLAIN 20))
+    (.setStroke (BasicStroke. (float 2)))
+    (.drawString (cond
+                  processing "Processing..."
+                  :else "Enter the problem in the grid or select a sample problem")
+                 0 380)
+    )
+  (doseq [r (vals squares)]
+    (.draw g (first r))
+    )
+
+  )
+
+(defn -add-listeners [applet & args]
+  (def object applet)
+  (.setLayout applet nil)
+  (doseq [r (vals squares)]    
+    (.setBounds (second r) (first r))
+    (.add object (second r))
+    )
+    (.addMouseListener reset
+                     (proxy [MouseAdapter] []
+                       (mousePressed [event]
+                         (-handle-reset event)))
+                     )
+    (.addMouseListener solve
+                       (proxy [MouseAdapter] []
+                         (mousePressed [event]
+                           (-handle-solve event)))
+                       )
+    (.setBackground solve Color/white)
+    (.setBounds solve 350 200 90 30)
+    (.add applet solve)
+    (.setBackground reset Color/white)
+    (.setBounds reset 350 280 90 30)
+    (.add applet reset)
+    (.setBounds sample1 350 50 90 30)
+    (.setBounds sample2 350 80 90 30)
+    (.setBounds sample3 350 110 90 30)
+    (.addItemListener sample1
+                      (proxy [ItemListener] []
+                        (itemStateChanged [event]
+                          (-handle-sample event 1)))
+                      )
+    (.addItemListener sample2
+                      (proxy [ItemListener] []
+                        (itemStateChanged [event]
+                          (-handle-sample event 2)))
+                      )
+    (.addItemListener sample3
+                      (proxy [ItemListener] []
+                        (itemStateChanged [event]
+                          (-handle-sample event 3)))
+                      )
+    (doto applet
+      (.add sample1)
+      (.add sample2)
+      (.add sample3)
+      )
+    )
+
+(defn -handle-reset [event]
+  (doseq [r (vals squares)]
+    (.setText (second r) "")
+    )
+  )
+
+(defn -handle-solve [event]
+  (def problem
+    (filter #(if (not (nil? %)) 1)
+     (map #(cond
+            (not (= "" (.getText (second (get squares %)))))
+            (conj % (Integer/parseInt (.getText (second (get squares %)))) )
+            ) 
+          indices)))
+
+  (send transient-grid #(assoc % :processing true))
+  (await transient-grid)
+  (def solution
+    (first (pcalls
+     #(solve_sudoku problem transient-grid)
+     #(while (get @transient-grid :processing)
+        (-fill-grid (get @transient-grid :grid))
+        )
+     ))
+    )  
+  (-fill-grid solution)
+  
+;  (-fill-grid (solve_sudoku problem))
+  )
+
+(defn -handle-sample [event num]
+  (if (= (.getStateChange event) ItemEvent/SELECTED)
+    (do 
+        (def problem (-> "sudoku.front/sudoku_m" (.concat (.toString num)) symbol resolve var-get))
+        (-fill-grid problem)
+        )
+    )
+  )
+
+(defn -fill-grid [box]
+  (-handle-reset nil)  
+  (cond
+   (seq? box)
+   (doseq [b box]
+     (.setText (second (get squares (vec (take 2 b)))) (.toString (nth b 2)))
+     )
+   :else
+   (doseq [i (range 9) j (range 9)]
+     (.setText (second (get squares (vector i j))) (.toString (first (aget box i j))))
+     )
+   )
+  )
